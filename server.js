@@ -4,9 +4,10 @@ const { Server } = require('socket.io');
 const path = require('path');
 const { Pool } = require('pg');
 
+// Замените блок инициализации сервера на этот:
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+const io = new Server(server); // Без всяких дополнительных настроек CORS
 const PORT = process.env.PORT || 3000;
 
 // Стало (пример):
