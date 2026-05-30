@@ -259,3 +259,7 @@ function deleteAccount() {
         });
     }
 }
+// Функция закрытия модального окна профиля
+function closeProfile() {
+    document.getElementById('profile-modal').classList.add('hidden');
+}
