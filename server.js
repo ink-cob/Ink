@@ -15,7 +15,7 @@ const db = new sqlite3.Database(path.join(__dirname, 'chat_ink.db'), (err) => {
     else console.log('База данных SQLite успешно запущена!');
 });
 
-// Создание таблиц пользователей и сообщений, если они еще не созданы
+// Создание таблиц пользователей и сообщений
 db.serialize(() => {
     db.run(`CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
@@ -71,7 +71,6 @@ io.on('connection', (socket) => {
                 currentUserId = id;
                 activeUsers.add(id);
                 socket.join(id);
-                socket.join('global_channel');
                 io.emit('status_change', { id, online: true });
                 callback({ success: true, user });
             } else {
@@ -80,39 +79,28 @@ io.on('connection', (socket) => {
         });
     });
 
-    // Восстановление сессии после перезагрузки страницы
+    // Уведомление о подключении (для актуализации статуса)
     socket.on('reconnect_user', (id) => {
         db.get("SELECT id FROM users WHERE id = ?", [id], (err, user) => {
             if (user) {
                 currentUserId = id;
                 activeUsers.add(id);
                 socket.join(id);
-                socket.join('global_channel');
                 io.emit('status_change', { id, online: true });
             }
         });
     });
 
-    // Загрузка истории чата с использованием LEFT JOIN (защита общего канала)
+    // Загрузка истории личного чата
     socket.on('load_history', ({ chatWith }, callback) => {
         if (!currentUserId) return;
-        let query, params;
 
-        if (chatWith === 'global') {
-            query = `SELECT messages.*, IFNULL(users.name, 'Удаленный аккаунт') as fromName 
-                     FROM messages 
-                     LEFT JOIN users ON messages.sender = users.id 
-                     WHERE recipient = 'global' 
-                     ORDER BY timestamp ASC`;
-            params = [];
-        } else {
-            query = `SELECT messages.*, IFNULL(users.name, 'Удаленный аккаунт') as fromName 
-                     FROM messages 
-                     LEFT JOIN users ON messages.sender = users.id 
-                     WHERE (sender = ? AND recipient = ?) OR (sender = ? AND recipient = ?) 
-                     ORDER BY timestamp ASC`;
-            params = [currentUserId, chatWith, chatWith, currentUserId];
-        }
+        const query = `SELECT messages.*, IFNULL(users.name, 'Удаленный аккаунт') as fromName 
+                       FROM messages 
+                       LEFT JOIN users ON messages.sender = users.id 
+                       WHERE (sender = ? AND recipient = ?) OR (sender = ? AND recipient = ?) 
+                       ORDER BY timestamp ASC`;
+        const params = [currentUserId, chatWith, chatWith, currentUserId];
 
         db.all(query, params, (err, rows) => {
             if (err) return callback([]);
@@ -129,14 +117,14 @@ io.on('connection', (socket) => {
         });
     });
 
-    // Получение статусов пользователей онлайн/оффлайн
+    // Получение текущих статусов списка контактов (онлайн/оффлайн)
     socket.on('get_statuses', (ids, callback) => {
         const statuses = {};
         ids.forEach(id => statuses[id] = activeUsers.has(id));
         callback(statuses);
     });
 
-    // Поиск контакта по уникальному ID
+    // Поиск контакта по 5-значному ID
     socket.on('search_contact', (id, callback) => {
         db.get("SELECT id, name FROM users WHERE id = ?", [id], (err, user) => {
             if (user) callback({ success: true, contact: user });
@@ -144,10 +132,9 @@ io.on('connection', (socket) => {
         });
     });
 
-    // Отправка текстового сообщения
-    socket.on('send_message', ({ to, text, adminPassword }) => {
+    // Отправка сообщения в личный чат
+    socket.on('send_message', ({ to, text }) => {
         if (!currentUserId) return;
-        if (to === 'global' && adminPassword !== 'Max_092010_m') return;
 
         const msgId = '_' + Math.random().toString(36).substr(2, 9);
         const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -159,16 +146,13 @@ io.on('connection', (socket) => {
                     const name = user ? user.name : 'Пользователь';
                     const msg = { id: msgId, from: currentUserId, fromName: name, to, text, timestamp: time, edited: false };
                     
-                    if (to === 'global') {
-                        io.to('global_channel').emit('new_message', msg);
-                    } else {
-                        io.to(to).to(currentUserId).emit('new_message', msg);
-                    }
+                    // Отправляем сообщение получателю и отправителю
+                    io.to(to).to(currentUserId).emit('new_message', msg);
                 });
         });
     });
 
-    // Редактирование своего сообщения
+    // Редактирование сообщения
     socket.on('edit_message', ({ msgId, newText }) => {
         db.run("UPDATE messages SET text = ?, edited = 1 WHERE id = ? AND sender = ?", [newText, msgId, currentUserId], function(err) {
             if (this.changes > 0) {
@@ -177,33 +161,25 @@ io.on('connection', (socket) => {
                         const name = user ? user.name : 'Пользователь';
                         const updated = { id: m.id, from: m.sender, fromName: name, to: m.recipient, text: m.text, timestamp: m.timestamp, edited: true };
                         
-                        if (m.recipient === 'global') {
-                            io.to('global_channel').emit('update_message', updated);
-                        } else {
-                            io.to(m.recipient).to(m.sender).emit('update_message', updated);
-                        }
+                        io.to(m.recipient).to(m.sender).emit('update_message', updated);
                     });
                 });
             }
         });
     });
 
-    // Удаление своего сообщения
+    // Удаление сообщения
     socket.on('delete_message', (msgId) => {
         db.get("SELECT * FROM messages WHERE id = ?", [msgId], (err, m) => {
             if (m && m.sender === currentUserId) {
                 db.run("DELETE FROM messages WHERE id = ?", [msgId], () => {
-                    if (m.recipient === 'global') {
-                        io.to('global_channel').emit('message_deleted', msgId);
-                    } else {
-                        io.to(m.recipient).to(m.sender).emit('message_deleted', msgId);
-                    }
+                    io.to(m.recipient).to(m.sender).emit('message_deleted', msgId);
                 });
             }
         });
     });
 
-    // Обновление данных профиля (Имя и Пароль)
+    // Обновление профиля (Смена имени и пароля)
     socket.on('update_profile', ({ name, password }, callback) => {
         if (!currentUserId) return;
         db.run("UPDATE users SET name = ?, password = ? WHERE id = ?", [name, password, currentUserId], (err) => {
@@ -215,7 +191,7 @@ io.on('connection', (socket) => {
         });
     });
 
-    // Полное удаление аккаунта и связанных с ним диалогов
+    // Полное удаление аккаунта и всей его истории сообщений
     socket.on('delete_account', (callback) => {
         if (!currentUserId) return;
         const id = currentUserId;
@@ -228,7 +204,7 @@ io.on('connection', (socket) => {
         callback({ success: true });
     });
 
-    // Отключение пользователя (Смена статуса на оффлайн)
+    // Отключение пользователя
     socket.on('disconnect', () => {
         if (currentUserId) {
             activeUsers.delete(currentUserId);
