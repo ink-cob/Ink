@@ -114,6 +114,9 @@ function selectChat(id) {
     document.getElementById('active-chat-status').className = isGlobal ? 'hidden' : 'status-dot';
     document.getElementById('admin-pass-input').classList.toggle('hidden', !isGlobal);
 
+    // Добавлено: Активация мобильного режима (скрываем контакты, показываем чат)
+    document.getElementById('app-container').classList.add('chat-open');
+
     socket.emit('load_history', { chatWith: id }, (messages) => {
         currentChatMessages = messages;
         renderMessages();
@@ -237,23 +240,13 @@ function openProfile() {
     document.getElementById('profile-modal').classList.remove('hidden');
 }
 
-function closeProfile() {
-    document.getElementById('profile-modal').classList.add('hidden');
-}
-
-function saveProfile() {
-    const name = document.getElementById('prof-name').value;
-    const password = document.getElementById('prof-pass').value;
-
-    socket.emit('update_profile', { name, password }, (res) => {
-        if (res.success) {
-            currentUser = res.user;
-            localStorage.setItem('chat_ink_user', JSON.stringify(currentUser));
-            alert('Профиль обновлен');
-            closeProfile();
-            renderContacts();
-        }
-    });
+// Функция выхода из чата обратно к списку контактов (для мобильных телефонов)
+function closeChat() {
+    activeChat = null;
+    // Убираем класс мобильного режима, чтобы снова показать список контактов
+    document.getElementById('app-container').classList.remove('chat-open');
+    document.getElementById('chat-active').classList.add('hidden');
+    document.getElementById('chat-blank').classList.remove('hidden');
 }
 
 function deleteAccount() {
