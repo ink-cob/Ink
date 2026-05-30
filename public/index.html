@@ -2,11 +2,12 @@
 <html lang="ru" data-theme="light">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Chat Ink</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
+    <!-- Окно авторизации -->
     <div id="auth-container" class="auth-box">
         <h2>Chat Ink</h2>
         <div id="auth-forms">
@@ -27,8 +28,10 @@
         </div>
     </div>
 
+    <!-- Основной интерфейс мессенджера -->
     <div id="app-container" class="hidden">
-        <div class="sidebar">
+        <!-- Левая панель (Контакты) -->
+        <div class="sidebar" id="app-sidebar">
             <div class="sidebar-header">
                 <h3>Chat Ink</h3>
                 <button id="theme-btn" onclick="toggleTheme()">🌓</button>
@@ -47,13 +50,19 @@
             </div>
         </div>
 
-        <div class="chat-area">
+        <!-- Правая панель (Чат) -->
+        <div class="chat-area" id="app-chat-area">
             <div id="chat-blank" class="chat-blank">Выберите чат для начала общения</div>
+            
             <div id="chat-active" class="hidden">
                 <div class="chat-header">
-                    <div>
-                        <span id="active-chat-name">Имя контакта</span>
-                        <span id="active-chat-status" class="status-dot"></span>
+                    <div class="chat-header-left">
+                        <!-- Кнопка Назад для телефонов -->
+                        <button id="back-btn" class="back-button" onclick="closeChat()">⬅ Назад</button>
+                        <div>
+                            <span id="active-chat-name">Имя контакта</span>
+                            <span id="active-chat-status" class="status-dot"></span>
+                        </div>
                     </div>
                     <button id="delete-friend-btn" onclick="deleteCurrentFriend()">Удалить из друзей</button>
                 </div>
@@ -67,6 +76,7 @@
         </div>
     </div>
 
+    <!-- Модальное окно профиля -->
     <div id="profile-modal" class="modal hidden">
         <div class="modal-content">
             <h3>Ваш профиль</h3>
