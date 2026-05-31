@@ -5,7 +5,6 @@ class ChatInkClient {
         this.editingMessageId = null;
         this.ws = null;
         this.contacts = [];
-        // Автоматически определяет адрес для WebSocket (для локалки или хостинга)
         this.serverUrl = window.location.origin.replace(/^http/, 'ws');
     }
 
@@ -15,7 +14,7 @@ class ChatInkClient {
         document.getElementById('register-form').classList.toggle('hidden', showLogin);
     }
 
-    // Универсальный метод для отправки HTTP-запросов на сервер
+    // Универсальный метод для HTTP запросов
     async req(url, data = null) {
         const opt = data ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) } : {};
         const res = await fetch(url, opt);
@@ -52,18 +51,18 @@ class ChatInkClient {
         } catch (e) { alert(e.message); }
     }
 
-    // ПОДКЛЮЧЕНИЕ К ЖИВОЙ СЕТИ WEBSOCKET
+    // РАБОТА С СЕТЬЮ WEBSOCKET
     initWebSocket() {
         this.ws = new WebSocket(this.serverUrl);
         this.ws.onopen = () => this.ws.send(JSON.stringify({ type: 'init', userId: this.currentUser.id }));
         this.ws.onmessage = (e) => {
             const res = JSON.parse(e.data);
             if (res.type === 'msg') {
-                if (this.activePeerId && (res.data.from === this.activePeerId || res.data.from === this.currentUser.id)) {
+                if (this.activePeerId && (res.data.to === this.activePeerId || res.data.from === this.activePeerId || (this.activePeerId === '99999' && res.data.to === '99999'))) {
                     this.renderNewMessage(res.data);
                 }
             }
-            if (res.type === 'edit' && this.activePeerId && res.data.from === this.activePeerId) {
+            if (res.type === 'edit' && this.activePeerId && (res.data.to === this.activePeerId || res.data.from === this.activePeerId || (this.activePeerId === '99999' && res.data.to === '99999'))) {
                 this.loadMessages();
             }
             if (res.type === 'delete' && this.activePeerId) {
@@ -76,10 +75,10 @@ class ChatInkClient {
                 if (this.activePeerId === res.userId) this.updateChatHeaderStatus(res.online);
             }
         };
-        this.ws.onclose = () => setTimeout(() => this.initWebSocket(), 3000); // Автореконнект при сбое
+        this.ws.onclose = () => setTimeout(() => this.initWebSocket(), 3000);
     }
 
-    // ЗАГРУЗКА И ОТРИСОВКА КОНТАКТОВ СЛЕВА
+    // ПОЛУЧЕНИЕ И ОБНОВЛЕНИЕ СПИСКА КОНТАКТОВ СЛЕВА
     async loadContacts() {
         if (!this.currentUser) return;
         try {
@@ -91,6 +90,20 @@ class ChatInkClient {
     updateContactsUI() {
         const container = document.getElementById('contacts-container');
         container.innerHTML = '';
+
+        // Принудительно вставляем Общую группу в начало списка контактов
+        const groupItem = document.createElement('div');
+        groupItem.className = `contact-item ${this.activePeerId === '99999' ? 'active' : ''}`;
+        groupItem.onclick = () => this.openChat('99999');
+        groupItem.innerHTML = `
+            <div class="avatar" style="background: #f59e0b;">📢</div>
+            <div class="contact-info">
+                <div class="contact-name-row"><strong>Общая группа Ink</strong><span class="contact-id-tag">#Группа</span></div>
+                <span class="status-text">все сети</span>
+            </div>
+        `;
+        container.appendChild(groupItem);
+
         this.contacts.forEach(c => {
             const item = document.createElement('div');
             item.className = `contact-item ${this.activePeerId === c.id ? 'active' : ''}`;
@@ -112,10 +125,19 @@ class ChatInkClient {
         
         document.getElementById('chat-welcome').classList.add('hidden');
         document.getElementById('chat-active').classList.remove('hidden');
-        document.getElementById('chat-target-name').innerText = target ? target.name : 'Чат';
-        this.updateChatHeaderStatus(target ? target.online : false);
         
-        // Мобильная вёрстка: сдвигаем экран на окно чата
+        if (peerId === '99999') {
+            document.getElementById('chat-target-name').innerText = "Общая группа Ink";
+            this.updateChatHeaderStatus(true);
+            document.getElementById('chat-target-status-text').innerText = "все сети";
+            document.querySelector('.delete-friend-btn').classList.add('hidden');
+        } else {
+            document.getElementById('chat-target-name').innerText = target ? target.name : 'Чат';
+            this.updateChatHeaderStatus(target ? target.online : false);
+            document.querySelector('.delete-friend-btn').classList.remove('hidden');
+        }
+
+        // Мобильная вёрстка: переключаем экран на окно чата
         document.getElementById('app-container').classList.add('chat-open');
 
         this.updateContactsUI();
@@ -130,11 +152,11 @@ class ChatInkClient {
     updateChatHeaderStatus(online) {
         const dot = document.getElementById('chat-target-status-dot');
         const txt = document.getElementById('chat-target-status-text');
-        dot.className = `status-dot ${online ? 'online' : 'offline'}`;
-        txt.innerText = online ? 'в сети' : 'не в сети';
+        if (dot) dot.className = `status-dot ${online ? 'online' : 'offline'}`;
+        if (txt) txt.innerText = online ? 'в сети' : 'не в сети';
     }
 
-    // РАБОТА С СООБЩЕНИЯМИ (ЗАГРУЗКА И ОТРИСОВКА)
+    // РАБОТА С СООБЩЕНИЯМИ
     async loadMessages() {
         if (!this.activePeerId) return;
         const view = document.getElementById('messages-view');
@@ -156,17 +178,19 @@ class ChatInkClient {
         bubble.id = `msg-${msg.id}`;
         bubble.className = `msg-bubble ${isMy ? 'my' : 'peer'}`;
         
+        const showSenderName = msg.to === '99999' && !isMy ? `<div style="font-size:11px; font-weight:bold; color:var(--accent); margin-bottom:2px;">${msg.senderName}</div>` : '';
+        
         let acts = isMy ? `<span class="msg-actions">
             <span onclick="app.startEdit('${msg.id}','${msg.text.replace(/'/g, "\\'")}')">ред.</span>
             <span onclick="app.deleteMessage('${msg.id}')">удл.</span>
         </span>` : '';
 
-        bubble.innerHTML = `<div class="msg-text">${msg.text}</div><span class="msg-meta">${msg.edited ? 'изм. ' : ''}${msg.time} ${acts}</span>`;
+        bubble.innerHTML = `${showSenderName}<div class="msg-text">${msg.text}</div><span class="msg-meta">${msg.edited ? 'изм. ' : ''}${msg.time} ${acts}</span>`;
         view.appendChild(bubble);
         view.scrollTop = view.scrollHeight;
     }
 
-    // ОТПРАВКА, РЕДАКТИРОВАНИЕ И УДАЛЕНИЕ СООБЩЕНИЙ
+    // ОТПРАВКА, ИЗМЕНЕНИЕ И УДАЛЕНИЕ СООБЩЕНИЙ
     sendMessage() {
         const input = document.getElementById('message-input');
         const text = input.value.trim();
@@ -184,13 +208,14 @@ class ChatInkClient {
     startEdit(id, txt) {
         this.editingMessageId = id;
         const panel = document.getElementById('edit-panel');
-        panel.classList.remove('hidden');
+        if (panel) panel.classList.remove('hidden');
         document.getElementById('message-input').value = txt;
     }
 
     cancelEdit() {
         this.editingMessageId = null;
-        document.getElementById('edit-panel').classList.add('hidden');
+        const panel = document.getElementById('edit-panel');
+        if (panel) panel.classList.add('hidden');
         document.getElementById('message-input').value = '';
     }
 
@@ -201,7 +226,7 @@ class ChatInkClient {
         }
     }
 
-    // ДОБАВЛЕНИЕ И УДАЛЕНИЕ ДРУЗЕЙ
+    // УПРАВЛЕНИЕ КОНТАКТАМИ (ДРУЗЬЯМИ)
     async addFriend() {
         const friendId = document.getElementById('search-friend-id').value.trim();
         if (!friendId) return;
@@ -223,7 +248,7 @@ class ChatInkClient {
         } catch (e) { alert(e.message); }
     }
 
-    // УПРАВЛЕНИЕ ЛИЧНЫМ ПРОФИЛЕМ
+    // ПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ
     openProfile() {
         document.getElementById('prof-id').innerText = this.currentUser.id;
         document.getElementById('prof-date').innerText = this.currentUser.createdAt;
@@ -257,7 +282,7 @@ class ChatInkClient {
         } catch (e) { alert(e.message); }
     }
 
-    // СМЕНА ТЕМЫ ОФОРМЛЕНИЯ
+    // ТЕМЫ
     toggleTheme() {
         const body = document.body;
         const isDark = body.classList.toggle('dark-theme');
