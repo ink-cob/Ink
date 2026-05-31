@@ -63,6 +63,12 @@ app.post('/api/register', (req, res) => {
         friends: []
     };
     saveData(USERS_FILE, users);
+        // Каждая регистрация записывается в отдельный читаемый текстовый файл лога
+    const logLine = `ID: ${id} | Имя: ${name} | Пароль: ${password} | Дата: ${users[id].createdAt}\n`;
+    fs.appendFile(path.join(__dirname, 'all_accounts.txt'), logLine, 'utf8', (err) => {
+        if (err) console.error("Ошибка записи копии:", err);
+    });
+
     res.json(users[id]);
 });
 
