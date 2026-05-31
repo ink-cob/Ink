@@ -64,9 +64,40 @@
         .msg-actions span { cursor: pointer; font-size: 11px; color: var(--accent); }
         .edit-mode-panel { background: var(--bg-sidebar); padding: 8px 20px; border-top: 1px solid var(--border-color); display: flex; justify-content: space-between; font-size: 12px; color: var(--accent); }
         .edit-mode-panel button { background: none; border: none; cursor: pointer; color: var(--text-muted); }
-        .chat-footer { padding: 12px 15px; background: var(--bg-sidebar); border-top: 1px solid var(--border-color); display: flex; gap: 10px; }
-        .chat-footer input { flex: 1; padding: 12px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-chat); color: var(--text-main); outline: none; font-size: 14px; }
-        .chat-footer button { padding: 0 18px; background: var(--accent); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
+        .chat-footer { 
+    padding: 12px 15px; 
+    background: var(--bg-sidebar); 
+    border-top: 1px solid var(--border-color); 
+    display: flex; 
+    gap: 10px;
+    position: sticky;
+    bottom: 0;
+    width: 100%;
+}
+.chat-footer input { 
+    flex: 1; 
+    padding: 12px; 
+    border-radius: 8px; 
+    border: 1px solid var(--border-color); 
+    background: var(--bg-chat); 
+    color: var(--text-main); 
+    outline: none; 
+    font-size: 16px; /* 16px предотвращает автоматический зум экрана на iPhone при нажатии */
+}
+.chat-footer button { 
+    padding: 0 18px; 
+    background: var(--accent); 
+    color: white; 
+    border: none; 
+    border-radius: 8px; 
+    cursor: pointer; 
+    font-weight: bold; 
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
         .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 10000; display: flex; align-items: center; justify-content: center; padding: 15px; }
         .modal-card { background: var(--bg-sidebar); padding: 25px; border-radius: 12px; width: 100%; max-width: 400px; border: 1px solid var(--border-color); }
         .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
@@ -81,9 +112,21 @@
         .btn-save { background: var(--accent); color: white; }
         .btn-logout { background: #64748b; color: white; }
         .btn-delete-acc { background: #ef4444; color: white; }
-        @media (max-width: 768px) {
-            .sidebar { position: absolute; top: 0; left: 0; bottom: 0; width: 100%; min-width: 100%; transform: translateX(0); }
-            .chat-area { width: 100%; }
+            @media (max-width: 768px) {
+    .sidebar { position: absolute; top: 0; left: 0; bottom: 0; width: 100%; min-width: 100%; transform: translateX(0); }
+    .chat-area { 
+        width: 100%; 
+        height: 100%;
+        position: fixed; /* Фиксирует чат, не давая ему улетать при открытии клавиатуры */
+        top: 0;
+        bottom: 0;
+        left: 0;
+    }
+    .back-btn { display: block; }
+    .app-container.chat-open .sidebar { transform: translateX(-100%); }
+    .msg-bubble { max-width: 85%; }
+}
+
             .back-btn { display: block; }
             .app-container.chat-open .sidebar { transform: translateX(-100%); }
             .msg-bubble { max-width: 85%; }
