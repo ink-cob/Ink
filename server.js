@@ -1,216 +1,228 @@
 const express = require('express');
 const http = require('http');
-const { Server } = require('socket.io');
+const WebSocket = require('ws');
 const path = require('path');
-const sqlite3 = require('sqlite3').verbose();
+const fs = require('fs');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
-const PORT = process.env.PORT || 3000;
+const wss = new WebSocket.Server({ server });
 
-// Автоматическое создание локальной базы данных в файле chat_ink.db
-const db = new sqlite3.Database(path.join(__dirname, 'chat_ink.db'), (err) => {
-    if (err) console.error('Ошибка SQLite:', err.message);
-    else console.log('База данных SQLite успешно запущена!');
-});
+app.use(express.json());
+app.use(express.static(path.join(__dirname)));
 
-// Создание таблиц пользователей и сообщений
-db.serialize(() => {
-    db.run(`CREATE TABLE IF NOT EXISTS users (
-        id TEXT PRIMARY KEY,
-        name TEXT,
-        password TEXT,
-        createdAt TEXT
-    )`);
+// Пути к файлам базы данных на сервере
+const USERS_FILE = path.join(__dirname, 'users.json');
+const MESSAGES_FILE = path.join(__dirname, 'messages.json');
 
-    db.run(`CREATE TABLE IF NOT EXISTS messages (
-        id TEXT PRIMARY KEY,
-        sender TEXT,
-        recipient TEXT,
-        text TEXT,
-        timestamp TEXT,
-        edited INTEGER DEFAULT 0
-    )`);
-});
+// Функции безопасного чтения и записи файлов
+function loadData(filePath, defaultData) {
+    try {
+        if (fs.existsSync(filePath)) {
+            return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+        }
+    } catch (e) {
+        console.error("Ошибка чтения файла:", filePath, e);
+    }
+    return defaultData;
+}
 
-let activeUsers = new Set();
-app.use(express.static(path.join(__dirname, 'public')));
+function saveData(filePath, data) {
+    try {
+        fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+    } catch (e) {
+        console.error("Ошибка записи файла:", filePath, e);
+    }
+}
+
+// Загрузка данных при старте
+let users = loadData(USERS_FILE, {});
+let messages = loadData(MESSAGES_FILE, []);
+const activeConnections = {}; // Хранилище активных онлайн-сессий ID -> WebSocket
 
 // Генерация уникального 5-значного ID
 function generateUniqueId() {
-    return new Promise((resolve) => {
-        const checkId = () => {
-            const id = Math.floor(10000 + Math.random() * 90000).toString();
-            db.get("SELECT id FROM users WHERE id = ?", [id], (err, row) => {
-                if (!row) resolve(id);
-                else checkId();
-            });
-        };
-        checkId();
-    });
+    let id;
+    do {
+        id = Math.floor(10000 + Math.random() * 90000).toString();
+    } while (users[id]);
+    return id;
 }
 
-io.on('connection', (socket) => {
+// REST API для авторизации и управления профилем
+app.post('/api/register', (req, res) => {
+    const { name, password } = req.body;
+    if (!name || !password) return res.status(400).json({ error: 'Заполните все поля' });
+    
+    const id = generateUniqueId();
+    users[id] = {
+        id,
+        name,
+        password,
+        createdAt: new Date().toLocaleDateString(),
+        friends: []
+    };
+    saveData(USERS_FILE, users);
+    res.json(users[id]);
+});
+
+app.post('/api/login', (req, res) => {
+    const { id, password } = req.body;
+    const user = users[id];
+    if (!user || user.password !== password) {
+        return res.status(400).json({ error: 'Неверный ID или пароль' });
+    }
+    res.json(user);
+});
+
+app.post('/api/update-profile', (req, res) => {
+    const { id, password, name, newPassword } = req.body;
+    const user = users[id];
+    if (!user || user.password !== password) return res.status(400).json({ error: 'Ошибка доступа' });
+    
+    if (name) user.name = name;
+    if (newPassword) user.password = newPassword;
+    
+    saveData(USERS_FILE, users);
+    broadcastStatus(id, true);
+    res.json(user);
+});
+
+app.post('/api/delete-account', (req, res) => {
+    const { id, password } = req.body;
+    if (!users[id] || users[id].password !== password) return res.status(400).json({ error: 'Ошибка доступа' });
+    
+    delete users[id];
+    messages = messages.filter(m => m.from !== id && m.to !== id);
+    saveData(MESSAGES_FILE, messages);
+
+    if (activeConnections[id]) activeConnections[id].close();
+    delete activeConnections[id];
+    
+    Object.values(users).forEach(u => {
+        u.friends = u.friends.filter(fId => fId !== id);
+    });
+    
+    saveData(USERS_FILE, users);
+    res.json({ success: true });
+});
+
+app.post('/api/add-friend', (req, res) => {
+    const { userId, friendId } = req.body;
+    if (!users[friendId]) return res.status(404).json({ error: 'Пользователь не найден' });
+    if (userId === friendId) return res.status(400).json({ error: 'Нельзя добавить себя' });
+    
+    if (!users[userId].friends.includes(friendId)) users[userId].friends.push(friendId);
+    if (!users[friendId].friends.includes(userId)) users[friendId].friends.push(userId);
+    
+    saveData(USERS_FILE, users);
+    res.json({ success: true });
+});
+
+app.post('/api/delete-friend', (req, res) => {
+    const { userId, friendId } = req.body;
+    if (users[userId]) users[userId].friends = users[userId].friends.filter(id => id !== friendId);
+    if (users[friendId]) users[friendId].friends = users[friendId].friends.filter(id => id !== userId);
+    saveData(USERS_FILE, users);
+    res.json({ success: true });
+});
+
+app.get('/api/contacts/:id', (req, res) => {
+    const user = users[req.params.id];
+    if (!user) return res.status(404).json({ error: 'Не найден' });
+    
+    const contactsData = user.friends.map(fId => ({
+        id: fId,
+        name: users[fId] ? users[fId].name : 'Удаленный аккаунт',
+        online: !!activeConnections[fId]
+    }));
+    res.json(contactsData);
+});
+
+app.get('/api/messages/:user1/:user2', (req, res) => {
+    const { user1, user2 } = req.params;
+    const filtered = messages.filter(m => 
+        (m.from === user1 && m.to === user2) || (m.from === user2 && m.to === user1)
+    );
+    res.json(filtered);
+});
+
+// Живая сеть WebSocket
+wss.on('connection', (ws) => {
     let currentUserId = null;
 
-    // Регистрация нового аккаунта
-    socket.on('register', async ({ name, password }, callback) => {
-        const id = await generateUniqueId();
-        const date = new Date().toLocaleDateString('ru-RU');
-        db.run("INSERT INTO users (id, name, password, createdAt) VALUES (?, ?, ?, ?)", [id, name, password, date], (err) => {
-            if (err) return callback({ success: false, message: 'Ошибка регистрации' });
-            callback({ success: true, user: { id, name, password, createdAt: date } });
-        });
-    });
+    ws.on('message', (messageStr) => {
+        const data = JSON.parse(messageStr);
 
-    // Авторизация (Вход)
-    socket.on('login', ({ id, password }, callback) => {
-        db.get("SELECT * FROM users WHERE id = ?", [id], (err, user) => {
-            if (user && user.password === password) {
-                currentUserId = id;
-                activeUsers.add(id);
-                socket.join(id);
-                io.emit('status_change', { id, online: true });
-                callback({ success: true, user });
-            } else {
-                callback({ success: false, message: 'Неверный ID или пароль' });
+        if (data.type === 'init') {
+            currentUserId = data.userId;
+            activeConnections[currentUserId] = ws;
+            broadcastStatus(currentUserId, true);
+        }
+
+        if (data.type === 'message') {
+            const msg = {
+                id: Math.random().toString(36).substr(2, 9),
+                from: data.from,
+                to: data.to,
+                text: data.text,
+                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                edited: false
+            };
+            messages.push(msg);
+            saveData(MESSAGES_FILE, messages);
+            
+            sendToUser(data.to, { type: 'msg', data: msg });
+            sendToUser(data.from, { type: 'msg', data: msg });
+        }
+
+        if (data.type === 'edit') {
+            const msg = messages.find(m => m.id === data.msgId && m.from === data.userId);
+            if (msg) {
+                msg.text = data.newText;
+                msg.edited = true;
+                saveData(MESSAGES_FILE, messages);
+                
+                sendToUser(msg.to, { type: 'edit', data: msg });
+                sendToUser(msg.from, { type: 'edit', data: msg });
             }
-        });
-    });
+        }
 
-    // Уведомление о подключении (для актуализации статуса)
-    socket.on('reconnect_user', (id) => {
-        db.get("SELECT id FROM users WHERE id = ?", [id], (err, user) => {
-            if (user) {
-                currentUserId = id;
-                activeUsers.add(id);
-                socket.join(id);
-                io.emit('status_change', { id, online: true });
+        if (data.type === 'delete') {
+            const index = messages.findIndex(m => m.id === data.msgId && m.from === data.userId);
+            if (index !== -1) {
+                const msg = messages[index];
+                messages.splice(index, 1);
+                saveData(MESSAGES_FILE, messages);
+                
+                sendToUser(msg.to, { type: 'delete', msgId: data.msgId });
+                sendToUser(msg.from, { type: 'delete', msgId: data.msgId });
             }
-        });
+        }
     });
 
-    // Загрузка истории личного чата
-    socket.on('load_history', ({ chatWith }, callback) => {
-        if (!currentUserId) return;
-
-        const query = `SELECT messages.*, IFNULL(users.name, 'Удаленный аккаунт') as fromName 
-                       FROM messages 
-                       LEFT JOIN users ON messages.sender = users.id 
-                       WHERE (sender = ? AND recipient = ?) OR (sender = ? AND recipient = ?) 
-                       ORDER BY timestamp ASC`;
-        const params = [currentUserId, chatWith, chatWith, currentUserId];
-
-        db.all(query, params, (err, rows) => {
-            if (err) return callback([]);
-            const formatted = rows.map(r => ({
-                id: r.id, 
-                from: r.sender, 
-                to: r.recipient, 
-                fromName: r.fromName,
-                text: r.text, 
-                timestamp: r.timestamp, 
-                edited: !!r.edited
-            }));
-            callback(formatted);
-        });
-    });
-
-    // Получение текущих статусов списка контактов (онлайн/оффлайн)
-    socket.on('get_statuses', (ids, callback) => {
-        const statuses = {};
-        ids.forEach(id => statuses[id] = activeUsers.has(id));
-        callback(statuses);
-    });
-
-    // Поиск контакта по 5-значному ID
-    socket.on('search_contact', (id, callback) => {
-        db.get("SELECT id, name FROM users WHERE id = ?", [id], (err, user) => {
-            if (user) callback({ success: true, contact: user });
-            else callback({ success: false, message: 'Пользователь не найден' });
-        });
-    });
-
-    // Отправка сообщения в личный чат
-    socket.on('send_message', ({ to, text }) => {
-        if (!currentUserId) return;
-
-        const msgId = '_' + Math.random().toString(36).substr(2, 9);
-        const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-        db.run("INSERT INTO messages (id, sender, recipient, text, timestamp) VALUES (?, ?, ?, ?, ?)", 
-            [msgId, currentUserId, to, text, time], (err) => {
-                if (err) return;
-                db.get("SELECT name FROM users WHERE id = ?", [currentUserId], (err, user) => {
-                    const name = user ? user.name : 'Пользователь';
-                    const msg = { id: msgId, from: currentUserId, fromName: name, to, text, timestamp: time, edited: false };
-                    
-                    // Отправляем сообщение получателю и отправителю
-                    io.to(to).to(currentUserId).emit('new_message', msg);
-                });
-        });
-    });
-
-    // Редактирование сообщения
-    socket.on('edit_message', ({ msgId, newText }) => {
-        db.run("UPDATE messages SET text = ?, edited = 1 WHERE id = ? AND sender = ?", [newText, msgId, currentUserId], function(err) {
-            if (this.changes > 0) {
-                db.get("SELECT * FROM messages WHERE id = ?", [msgId], (err, m) => {
-                    db.get("SELECT name FROM users WHERE id = ?", [m.sender], (err, user) => {
-                        const name = user ? user.name : 'Пользователь';
-                        const updated = { id: m.id, from: m.sender, fromName: name, to: m.recipient, text: m.text, timestamp: m.timestamp, edited: true };
-                        
-                        io.to(m.recipient).to(m.sender).emit('update_message', updated);
-                    });
-                });
-            }
-        });
-    });
-
-    // Удаление сообщения
-    socket.on('delete_message', (msgId) => {
-        db.get("SELECT * FROM messages WHERE id = ?", [msgId], (err, m) => {
-            if (m && m.sender === currentUserId) {
-                db.run("DELETE FROM messages WHERE id = ?", [msgId], () => {
-                    io.to(m.recipient).to(m.sender).emit('message_deleted', msgId);
-                });
-            }
-        });
-    });
-
-    // Обновление профиля (Смена имени и пароля)
-    socket.on('update_profile', ({ name, password }, callback) => {
-        if (!currentUserId) return;
-        db.run("UPDATE users SET name = ?, password = ? WHERE id = ?", [name, password, currentUserId], (err) => {
-            if (!err) {
-                db.get("SELECT * FROM users WHERE id = ?", [currentUserId], (err, user) => {
-                    callback({ success: true, user });
-                });
-            }
-        });
-    });
-
-    // Полное удаление аккаунта и всей его истории сообщений
-    socket.on('delete_account', (callback) => {
-        if (!currentUserId) return;
-        const id = currentUserId;
-        db.serialize(() => {
-            db.run("DELETE FROM users WHERE id = ?", [id]);
-            db.run("DELETE FROM messages WHERE sender = ? OR recipient = ?", [id, id]);
-        });
-        activeUsers.delete(id);
-        io.emit('status_change', { id, online: false });
-        callback({ success: true });
-    });
-
-    // Отключение пользователя
-    socket.on('disconnect', () => {
+    ws.on('close', () => {
         if (currentUserId) {
-            activeUsers.delete(currentUserId);
-            io.emit('status_change', { id: currentUserId, online: false });
+            delete activeConnections[currentUserId];
+            broadcastStatus(currentUserId, false);
         }
     });
 });
 
-server.listen(PORT, () => console.log(`Сервер мессенджера запущен на порту ${PORT}`));
+function sendToUser(userId, obj) {
+    if (activeConnections[userId] && activeConnections[userId].readyState === WebSocket.OPEN) {
+        activeConnections[userId].send(JSON.stringify(obj));
+    }
+}
+
+function broadcastStatus(userId, online) {
+    Object.values(activeConnections).forEach(ws => {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'status', userId, online }));
+        }
+    });
+}
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => console.log(`Сервер запущен на порту ${PORT}`));
+

@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Chat Ink</title>
+    <style>
+        :root {
+            --bg-main: #e7ebf0; --bg-sidebar: #ffffff; --bg-chat: #f4f4f5; --text-main: #000000;
+            --text-muted: #707579; --accent: #2481cc; --accent-hover: #1a6fa8; --border-color: #dfdfdf;
+            --my-msg-bg: #eeffde; --peer-msg-bg: #ffffff;
+        }
+        body.dark-theme {
+            --bg-main: #0f172a; --bg-sidebar: #1e293b; --bg-chat: #0f172a; --text-main: #f8fafc;
+            --text-muted: #94a3b8; --accent: #38bdf8; --accent-hover: #0ea5e9; --border-color: #334155;
+            --my-msg-bg: #384152; --peer-msg-bg: #1e293b;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; -webkit-tap-highlight-color: transparent; }
+        html, body { height: 100%; overflow: hidden; background-color: var(--bg-main); color: var(--text-main); }
+        .hidden { display: none !important; }
+        .auth-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.4); backdrop-filter: blur(8px); z-index: 9999; display: flex; align-items: center; justify-content: center; padding: 20px; }
+        .auth-card { background: var(--bg-sidebar); padding: 30px; border-radius: 12px; width: 100%; max-width: 360px; box-shadow: 0 8px 24px rgba(0,0,0,0.2); text-align: center; border: 1px solid var(--border-color); }
+        .logo-text { font-size: 28px; color: var(--accent); margin-bottom: 20px; font-weight: bold; }
+        .auth-card h2 { font-size: 18px; margin-bottom: 15px; }
+        .auth-card input { width: 100%; padding: 12px; margin-bottom: 12px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-chat); color: var(--text-main); outline: none; }
+        .auth-card button { width: 100%; padding: 12px; background: var(--accent); color: white; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; font-weight: bold; }
+        .auth-card button:hover { background: var(--accent-hover); }
+        .auth-card p { margin-top: 15px; font-size: 14px; color: var(--text-muted); }
+        .link-btn { color: var(--accent); cursor: pointer; text-decoration: underline; }
+        .app-container { display: flex; height: 100vh; max-width: 1280px; margin: 0 auto; position: relative; background: var(--bg-sidebar); }
+        .sidebar { width: 320px; min-width: 320px; background: var(--bg-sidebar); border-right: 1px solid var(--border-color); display: flex; flex-direction: column; z-index: 10; transition: transform 0.3s ease; }
+        .sidebar-header { padding: 15px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-color); }
+        .user-brief { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+        .avatar { width: 40px; height: 40px; border-radius: 50%; background: var(--accent); color: white; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 16px; }
+        #theme-toggle-btn { background: none; border: none; font-size: 20px; cursor: pointer; }
+        .search-bar { padding: 10px; display: flex; gap: 5px; border-bottom: 1px solid var(--border-color); }
+        .search-bar input { flex: 1; padding: 10px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-chat); color: var(--text-main); outline: none; }
+        .search-bar button { padding: 0 14px; background: var(--accent); color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 18px; }
+        .contacts-list { flex: 1; overflow-y: auto; }
+        .contact-item { display: flex; align-items: center; padding: 12px 15px; gap: 12px; cursor: pointer; border-bottom: 1px solid var(--border-color); }
+        .contact-item:hover, .contact-item.active { background: rgba(36, 129, 204, 0.1); }
+        .contact-info { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+        .contact-name-row { display: flex; align-items: center; justify-content: space-between; }
+        .contact-id-tag { font-size: 11px; color: var(--text-muted); }
+        .status-wrapper { display: flex; align-items: center; gap: 6px; }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+        .status-dot.online { background-color: #4caf50; }
+        .status-dot.offline { background-color: #9e9e9e; }
+        .status-text { font-size: 12px; color: var(--text-muted); }
+        .chat-area { flex: 1; background: var(--bg-chat); display: flex; flex-direction: column; position: relative; z-index: 5; }
+        .chat-placeholder { flex: 1; display: flex; align-items: center; justify-content: center; padding: 20px; }
+        .placeholder-bubble { background: rgba(0,0,0,0.05); padding: 12px 20px; border-radius: 20px; text-align: center; color: var(--text-muted); }
+        .chat-wrapper { display: flex; flex-direction: column; height: 100%; }
+        .chat-header { padding: 12px 20px; background: var(--bg-sidebar); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; justify-content: space-between; }
+        .chat-header-left { display: flex; align-items: center; gap: 10px; }
+        .back-btn { background: none; border: none; font-size: 20px; color: var(--accent); cursor: pointer; display: none; padding: 5px; }
+        .delete-friend-btn { background: none; border: none; color: #ef4444; cursor: pointer; font-size: 13px; }
+        .messages-container { flex: 1; padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+        .msg-bubble { max-width: 75%; padding: 8px 14px; border-radius: 12px; font-size: 14px; position: relative; word-wrap: break-word; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+        .msg-bubble.my { background: var(--my-msg-bg); align-self: flex-end; border-bottom-right-radius: 2px; }
+        .msg-bubble.peer { background: var(--peer-msg-bg); align-self: flex-start; border-bottom-left-radius: 2px; }
+        .msg-meta { font-size: 10px; color: var(--text-muted); text-align: right; margin-top: 4px; display: block; }
+        .msg-actions { display: inline-flex; gap: 8px; margin-left: 10px; opacity: 0.7; }
+        .msg-actions span { cursor: pointer; font-size: 11px; color: var(--accent); }
+        .edit-mode-panel { background: var(--bg-sidebar); padding: 8px 20px; border-top: 1px solid var(--border-color); display: flex; justify-content: space-between; font-size: 12px; color: var(--accent); }
+        .edit-mode-panel button { background: none; border: none; cursor: pointer; color: var(--text-muted); }
+        .chat-footer { padding: 12px 15px; background: var(--bg-sidebar); border-top: 1px solid var(--border-color); display: flex; gap: 10px; }
+        .chat-footer input { flex: 1; padding: 12px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-chat); color: var(--text-main); outline: none; font-size: 14px; }
+        .chat-footer button { padding: 0 18px; background: var(--accent); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
+        .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 10000; display: flex; align-items: center; justify-content: center; padding: 15px; }
+        .modal-card { background: var(--bg-sidebar); padding: 25px; border-radius: 12px; width: 100%; max-width: 400px; border: 1px solid var(--border-color); }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .close-modal { background: none; border: none; font-size: 20px; cursor: pointer; color: var(--text-muted); }
+        .modal-body p { margin-bottom: 10px; }
+        .highlight-id { font-weight: bold; color: var(--accent); font-size: 16px; }
+        .input-group { margin-top: 15px; }
+        .input-group label { font-size: 12px; color: var(--text-muted); display: block; margin-bottom: 5px; }
+        .input-group input { width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--bg-chat); color: var(--text-main); outline: none; }
+        .profile-actions { margin-top: 25px; display: flex; flex-direction: column; gap: 10px; }
+        .profile-actions button { padding: 10px; border-radius: 6px; border: none; font-weight: bold; cursor: pointer; }
+        .btn-save { background: var(--accent); color: white; }
+        .btn-logout { background: #64748b; color: white; }
+        .btn-delete-acc { background: #ef4444; color: white; }
+        @media (max-width: 768px) {
+            .sidebar { position: absolute; top: 0; left: 0; bottom: 0; width: 100%; min-width: 100%; transform: translateX(0); }
+            .chat-area { width: 100%; }
+            .back-btn { display: block; }
+            .app-container.chat-open .sidebar { transform: translateX(-100%); }
+            .msg-bubble { max-width: 85%; }
+        }
+    </style>
+</head>
+<body class="light-theme">
+    <!-- БЛОКИРУЮЩЕЕ ОКНО АВТОРИЗАЦИИ -->
+    <div id="auth-screen" class="auth-overlay">
+        <div class="auth-card">
+            <h1 class="logo-text">Chat Ink</h1>
+            <div id="login-form">
+                <h2>Вход в аккаунт</h2>
+                <input type="text" id="login-id" placeholder="Ваш уникальный 5-значный ID">
+                <input type="password" id="login-pass" placeholder="Пароль">
+                <button onclick="app.login()">Войти</button>
+                <p>Нет аккаунта? <span class="link-btn" onclick="app.toggleAuthForms(false)">Зарегистрироваться</span></p>
+            </div>
+            <div id="register-form" class="hidden">
+                <h2>Регистрация</h2>
+                <input type="text" id="reg-name" placeholder="Отображаемое имя">
+                <input type="password" id="reg-pass" placeholder="Придумайте пароль">
+                <button onclick="app.register()">Создать аккаунт</button>
+                <p>Уже есть аккаунт? <span class="link-btn" onclick="app.toggleAuthForms(true)">Войти</span></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ОСНОВНОЙ ИНТЕРФЕЙС -->
+    <div class="app-container" id="app-container">
+        <!-- Список чатов -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="user-brief" onclick="app.openProfile()">
+                    <div class="avatar" id="my-avatar-letter">?</div>
+                    <span id="my-name-display">Загрузка...</span>
+                </div>
+                <button id="theme-toggle-btn" onclick="app.toggleTheme()">🌙</button>
+            </div>
+            <div class="search-bar">
+                <input type="text" id="search-friend-id" placeholder="Добавить друга по ID">
+                <button onclick="app.addFriend()">+</button>
+            </div>
+            <div class="contacts-list" id="contacts-container"></div>
+        </aside>
+
+        <!-- Окно чата -->
+        <main class="chat-area">
+            <div id="chat-welcome" class="chat-placeholder">
+                <div class="placeholder-bubble">Выберите диалог или введите уникальный ID друга</div>
+            </div>
+            <div id="chat-active" class="chat-wrapper hidden">
+                <header class="chat-header">
+                    <div class="chat-header-left">
+                        <button class="back-btn" onclick="app.closeChatMobile()">←</button>
+                        <div class="chat-target-info">
+                            <span id="chat-target-name">Собеседник</span>
+                            <div class="status-wrapper">
+                                <span id="chat-target-status-dot" class="status-dot"></span>
+                                <span id="chat-target-status-text" class="status-text">не в сети</span>
+                            </div>
+                        </div>
+                    </div>
+                    <button class="delete-friend-btn" onclick="app.deleteCurrentFriend()">Удалить контакт</button>
+                </header>
+
+                <div class="messages-container" id="messages-view"></div>
+
+                <div id="edit-panel" class="edit-mode-panel hidden">
+                    <span>Редактирование...</span>
+                    <button onclick="app.cancelEdit()">✕</button>
+                </div>
+
+                <footer class="chat-footer">
+                    <input type="text" id="message-input" placeholder="Напишите сообщение..." onkeydown="if(event.key === 'Enter') app.sendMessage()">
+                    <button onclick="app.sendMessage()">➡</button>
+                </footer>
+            </div>
+        </main>
+    </div>
+
+    <!-- МОДАЛЬНОЕ ОКНО ПРОФИЛЯ -->
+    <div id="profile-modal" class="modal-overlay hidden">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3>Ваш профиль</h3>
+                <button class="close-modal" onclick="app.closeProfile()">✕</button>
+            </div>
+            <div class="modal-body">
+                <p><strong>Ваш уникальный ID:</strong> <span id="prof-id" class="highlight-id">00000</span></p>
+                <p><strong>Дата создания:</strong> <span id="prof-date">-</span></p>
+                <div class="input-group"><label>Изменить имя:</label><input type="text" id="prof-name-input"></div>
+                <div class="input-group"><label>Новый пароль:</label><input type="password" id="prof-pass-input" placeholder="Введите новый пароль"></div>
+                <div class="profile-actions">
+                    <button class="btn-save" onclick="app.saveProfileChanges()">Сохранить изменения</button>
+                    <button class="btn-logout" onclick="app.logout()">Выйти из аккаунта</button>
+                    <button class="btn-delete-acc" onclick="app.deleteAccount()">Удалить аккаунт</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
