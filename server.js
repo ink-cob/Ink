@@ -160,21 +160,51 @@ wss.on('connection', (ws) => {
             broadcastStatus(currentUserId, true);
         }
 
-        if (data.type === 'message') {
+                if (data.type === 'message') {
+            // Проверка на сигнал "печатает"
+            if (data.isTypingSignal) {
+                if (data.to === '99999') {
+                    // Сигнал "печатает" в общую группу рассылаем всем, кроме отправителя
+                    Object.keys(activeConnections).forEach(uid => {
+                        if (uid !== data.from) sendToUser(uid, { type: 'typing', from: '99999', userName: users[data.from]?.name || 'Кто-то' });
+                    });
+                } else {
+                    sendToUser(data.to, { type: 'typing', from: data.from });
+                }
+                return;
+            }
+
+            const prefix = "@@@/Ink/";
+            const isGlobalGroup = data.text.startsWith(prefix);
+            const cleanText = isGlobalGroup ? data.text.substring(prefix.length).trim() : data.text;
+
+            if (!cleanText) return; // Если после префикса ничего нет, игнорируем
+
             const msg = {
                 id: Math.random().toString(36).substr(2, 9),
                 from: data.from,
-                to: data.to,
-                text: data.text,
+                to: isGlobalGroup ? '99999' : data.to, // 99999 — ID общей группы
+                text: cleanText,
                 time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                edited: false
+                edited: false,
+                senderName: users[data.from]?.name || 'Удаленный аккаунт' // Нужно для отображения в группе
             };
+
             messages.push(msg);
             saveData(MESSAGES_FILE, messages);
-            
-            sendToUser(data.to, { type: 'msg', data: msg });
-            sendToUser(data.from, { type: 'msg', data: msg });
+
+            if (isGlobalGroup) {
+                // Рассылаем сообщение ОГЛАСКОЙ всем активным пользователям
+                Object.keys(activeConnections).forEach(uid => {
+                    sendToUser(uid, { type: 'msg', data: msg });
+                });
+            } else {
+                // Обычная отправка тет-а-тет
+                sendToUser(data.to, { type: 'msg', data: msg });
+                sendToUser(data.from, { type: 'msg', data: msg });
+            }
         }
+
 
         if (data.type === 'edit') {
             const msg = messages.find(m => m.id === data.msgId && m.from === data.userId);
