@@ -1,3 +1,55 @@
+// ==========================================
+// ВСТАВИТЬ В САМЫЙ ВЕРХ ФАЙЛА SCRIPT.JS:
+// ==========================================
+import { initializeApp } from "https://gstatic.com";
+import { getMessaging, getToken } from "https://gstatic.com";
+
+// Ваши ключи из настроек веб-приложения в Firebase Console
+const firebaseConfig = {
+  apiKey : «AIzaSyDlWZs00u8GRjyfpDzR9bhGaaQ4yZ7U9sE» 
+  authDomain : "chat-ink-f64a8.firebaseapp.com" 
+  projectId : "chat-ink-f64a8" 
+  storageBucket : "chat-ink-f64a8.firebasestorage.app" 
+  messagingSenderId : "164752141733" 
+  appId : "1:164752141733:web:1e72be8be8709fe504cc4c"
+};
+
+const app = initializeApp(firebaseConfig);
+const messaging = getMessaging(app);
+
+
+// ==========================================
+// ДОБАВИТЬ ЭТУ ФУНКЦИЮ В ЛЮБОЕ МЕСТО СКРИПТА:
+// ==========================================
+async function initPushNotifications(currentUserId) {
+  try {
+    // Запрашиваем у операционной системы разрешение на пуши
+    const permission = await Notification.requestPermission();
+    
+    if (permission === 'granted') {
+      // Получаем уникальный токен браузера (вставьте сюда ваш VAPID-ключ из Firebase)
+      const token = await getToken(messaging, { vapidKey: 'ВАШ_VAPID_КЛЮЧ' });
+      
+      // Отправляем этот токен на наш сервер в созданный эндпоинт /save-token
+      await fetch('/save-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: currentUserId, token: token })
+      });
+      console.log("Устройство готово к получению пушей offline");
+    }
+  } catch (error) {
+    console.error("Ошибка регистрации пуш-уведомлений:", error);
+  }
+}
+
+// ==========================================
+// ВЫЗОВ ФУНКЦИИ:
+// Вызовите строку ниже там, где в вашем коде юзер заходит в мессенджер
+// и у вас есть его ID (вместо "user_123" передайте реальный ID пользователя)
+// ==========================================
+initPushNotifications("user_123");
+
 class ChatInkClient {
     constructor() {
         this.currentUser = null;
