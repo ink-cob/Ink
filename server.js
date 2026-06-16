@@ -14,35 +14,6 @@ app.use(express.static(path.join(__dirname)));
 // Пути к файлам базы данных на сервере
 const USERS_FILE = path.join(__dirname, 'users.json');
 const MESSAGES_FILE = path.join(__dirname, 'messages.json');
-// app.js
-import { initializeApp } from "https://gstatic.com";
-import { getMessaging, getToken } from "https://gstatic.com";
-
-const firebaseConfig = { /* Ваши данные конфигурации */ };
-const app = initializeApp(firebaseConfig);
-const messaging = getMessaging(app);
-
-async function requestPermissionAndGetToken() {
-  const permission = await Notification.requestPermission();
-  if (permission === 'granted') {
-    // Получаем FCM-токен устройства
-    const token = await getToken(messaging, { vapidKey: 'ВАШ_VAPID_КЛЮЧ_ИЗ_FIREBASE' });
-    console.log("FCM Токен получен:", token);
-    
-    // Отправляем токен на ваш бэкенд, чтобы связать его с пользователем
-    await fetch('/api/save-token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: 'user_123', token: token })
-    });
-  } else {
-    console.log('Пользователь запретил уведомления');
-  }
-}
-
-// Вызовите эту функцию при авторизации или по клику на кнопку «Включить уведомления»
-requestPermissionAndGetToken();
-
 
 // Функции безопасного чтения и записи файлов
 function loadData(filePath, defaultData) {
@@ -239,6 +210,46 @@ wss.on('connection', (ws) => {
                 sendToUser(data.from, { type: 'msg', data: msg });
             }
         }
+// 1. Вставьте в самое начало файла server.js:
+const admin = require('firebase-admin');
+const serviceAccount = require("./firebase-key.json"); // Ваш ключ из Firebase
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
+
+// Временный объект для хранения токенов в памяти сервера
+const userPushTokens = {};
+
+// 2. Добавьте этот эндпоинт в любое место, где у вас прописаны маршруты (app.post/app.get):
+app.post('/save-token', (req, res) => {
+  const { userId, token } = req.body;
+  userPushTokens[userId] = token; // Запоминаем, какому пользователю принадлежит браузер
+  res.sendStatus(200);
+});
+
+// 3. НАЙДИТЕ вашу существующую функцию/эндпоинт отправки сообщения (например, app.post('/send', ...))
+// И добавьте туда логику отправки пуша ПОСЛЕ того, как сообщение обработано:
+app.post('/your-existing-send-message-endpoint', (req, res) => {
+  // ... ваш текущий код отправки сообщения ...
+
+  const recipientId = req.body.recipientId; // ID того, кому пишут (измените под вашу переменную)
+  const messageText = req.body.text;        // Текст сообщения (измените под вашу переменную)
+  const senderName = req.body.senderName;   // Имя отправителя (измените под вашу переменную)
+
+  // Дописываем отправку пуша:
+  const targetToken = userPushTokens[recipientId];
+  if (targetToken) {
+    admin.messaging().sendToDevice(targetToken, {
+      notification: {
+        title: `Новое сообщение от ${senderName}`,
+        body: messageText
+      }
+    }).catch(err => console.error("Ошибка отправки пуша:", err));
+  }
+
+  // ... ваш текущий res.send() или res.json() ...
+});
 
 
         if (data.type === 'edit') {
