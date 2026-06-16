@@ -1,3 +1,64 @@
+// ==========================================
+// ВСТАВИТЬ В САМОЕ НАЧАЛО ФАЙЛА SERVER.JS:
+// ==========================================
+const admin = require('firebase-admin');
+// Сюда подключается скачанный из Firebase JSON-файл ключа
+const serviceAccount = require("./firebase-key.json"); 
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
+
+// Временный объект для хранения пуш-токенов в памяти сервера
+const userPushTokens = {};
+
+
+// ==========================================
+// ДОБАВИТЬ НОВЫЙ МАРШРУТ (ЭНДПОИНТ):
+// ==========================================
+// Браузеры ваших пользователей будут автоматически слать сюда свои токены
+app.post('/save-token', (req, res) => {
+  const { userId, token } = req.body;
+  userPushTokens[userId] = token; // Запоминаем токен для конкретного ID
+  res.sendStatus(200);
+});
+
+
+// ==========================================
+// ВНЕДРИТЬ В ВАШУ ФУНКЦИЮ ОТПРАВКИ СООБЩЕНИЙ:
+// Найдите ваш app.post('/ваша-отправка') или функцию WebSocket
+// ==========================================
+app.post('/your-existing-send-route', (req, res) => {
+  
+  // ... ТУТ ИДЕТ ВАШ УЖЕ ГОТОВЫЙ КОД (сохранение в БД, отправка в вебсокет и т.д.) ...
+
+  // ДОПИСЫВАЕМ СЮДА ЛОГИКУ ПУШ-УВЕДОМЛЕНИЯ:
+  // Замените recipientId на вашу переменную ID получателя сообщения
+  const recipientId = req.body.toUserId; 
+  const targetToken = userPushTokens[recipientId];
+
+  // Если у получателя сохранен токен (он заходил на сайт и разрешил пуши)
+  if (targetToken) {
+    const payload = {
+      notification: {
+        title: "НОВОЕ СООБЩЕНИЕ",
+        body: "Открыть мессенджер"
+      }
+    };
+
+    const options = {
+      priority: "high",            // Доставлять немедленно
+      timeToLive: 60 * 60 * 24 * 7 // Ждать включения телефона в очереди до 7 дней
+    };
+
+    // Отправляем пуш через сервера Google в очередь
+    admin.messaging().sendToDevice(targetToken, payload, options)
+      .catch(err => console.error("Ошибка отправки пуша:", err));
+  }
+
+  // ... ТУТ ВАШ ТЕКУЩИЙ ОТВЕТ КЛИЕНТУ (например, res.json(...) или res.send(...)) ...
+});
+
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
