@@ -14,6 +14,35 @@ app.use(express.static(path.join(__dirname)));
 // Пути к файлам базы данных на сервере
 const USERS_FILE = path.join(__dirname, 'users.json');
 const MESSAGES_FILE = path.join(__dirname, 'messages.json');
+// app.js
+import { initializeApp } from "https://gstatic.com";
+import { getMessaging, getToken } from "https://gstatic.com";
+
+const firebaseConfig = { /* Ваши данные конфигурации */ };
+const app = initializeApp(firebaseConfig);
+const messaging = getMessaging(app);
+
+async function requestPermissionAndGetToken() {
+  const permission = await Notification.requestPermission();
+  if (permission === 'granted') {
+    // Получаем FCM-токен устройства
+    const token = await getToken(messaging, { vapidKey: 'ВАШ_VAPID_КЛЮЧ_ИЗ_FIREBASE' });
+    console.log("FCM Токен получен:", token);
+    
+    // Отправляем токен на ваш бэкенд, чтобы связать его с пользователем
+    await fetch('/api/save-token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: 'user_123', token: token })
+    });
+  } else {
+    console.log('Пользователь запретил уведомления');
+  }
+}
+
+// Вызовите эту функцию при авторизации или по клику на кнопку «Включить уведомления»
+requestPermissionAndGetToken();
+
 
 // Функции безопасного чтения и записи файлов
 function loadData(filePath, defaultData) {
