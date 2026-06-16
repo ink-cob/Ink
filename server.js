@@ -210,47 +210,6 @@ wss.on('connection', (ws) => {
                 sendToUser(data.from, { type: 'msg', data: msg });
             }
         }
-// 1. Вставьте в самое начало файла server.js:
-const admin = require('firebase-admin');
-const serviceAccount = require("./firebase-key.json"); // Ваш ключ из Firebase
-
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
-});
-
-// Временный объект для хранения токенов в памяти сервера
-const userPushTokens = {};
-
-// 2. Добавьте этот эндпоинт в любое место, где у вас прописаны маршруты (app.post/app.get):
-app.post('/save-token', (req, res) => {
-  const { userId, token } = req.body;
-  userPushTokens[userId] = token; // Запоминаем, какому пользователю принадлежит браузер
-  res.sendStatus(200);
-});
-
-// 3. НАЙДИТЕ вашу существующую функцию/эндпоинт отправки сообщения (например, app.post('/send', ...))
-// И добавьте туда логику отправки пуша ПОСЛЕ того, как сообщение обработано:
-app.post('/your-existing-send-message-endpoint', (req, res) => {
-  // ... ваш текущий код отправки сообщения ...
-
-  const recipientId = req.body.recipientId; // ID того, кому пишут (измените под вашу переменную)
-  const messageText = req.body.text;        // Текст сообщения (измените под вашу переменную)
-  const senderName = req.body.senderName;   // Имя отправителя (измените под вашу переменную)
-
-  // Дописываем отправку пуша:
-  const targetToken = userPushTokens[recipientId];
-  if (targetToken) {
-    admin.messaging().sendToDevice(targetToken, {
-      notification: {
-        title: `Новое сообщение от ${senderName}`,
-        body: messageText
-      }
-    }).catch(err => console.error("Ошибка отправки пуша:", err));
-  }
-
-  // ... ваш текущий res.send() или res.json() ...
-});
-
 
         if (data.type === 'edit') {
             const msg = messages.find(m => m.id === data.msgId && m.from === data.userId);
